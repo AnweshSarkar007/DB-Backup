@@ -83,6 +83,3 @@ for the threat model.
 | 11 | Restore to a target database | ✅ |
 | — | NSIS installer, code-signing, auto-update | ⏳ |
 
-## License
-
-Proprietary — Kasa India.
