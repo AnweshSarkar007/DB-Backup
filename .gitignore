@@ -1,0 +1,35 @@
+# Rust
+/target
+**/target
+Cargo.lock.orig
+
+# Node / frontend
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+
+# Tauri
+src-tauri/gen
+src-tauri/target
+
+# Env / secrets — NEVER commit real credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+
+# App runtime data (should live in ProgramData, but ignore any local strays)
+/work
+*.dump
+!examples/*.dump

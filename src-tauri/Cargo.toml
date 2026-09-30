@@ -1,0 +1,24 @@
+[package]
+name = "database-backup-manager"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Database Backup Manager desktop GUI (Tauri 2)."
+
+[[bin]]
+name = "DatabaseBackupManager"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+dbm-core = { path = "../crates/dbm-core" }

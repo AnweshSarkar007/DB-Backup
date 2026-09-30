@@ -1,0 +1,39 @@
+[package]
+name = "dbm-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core backup engine and abstractions for Database Backup Manager (no UI/Tauri deps)."
+
+[lib]
+name = "dbm_core"
+path = "src/lib.rs"
+
+[dependencies]
+tokio.workspace = true
+tokio-postgres.workspace = true
+native-tls.workspace = true
+postgres-native-tls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+keyring.workspace = true
+fs2.workspace = true
+url.workspace = true
+rusqlite.workspace = true
+reqwest.workspace = true
+async-trait.workspace = true
+base64 = "0.22"
+tokio-util = { version = "0.7", features = ["io"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "time", "sync"] }
+uuid.workspace = true

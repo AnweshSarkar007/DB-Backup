@@ -1,0 +1,20 @@
+{
+  "job_id": "1",
+  "connection": {
+    "name": "Glasafe Production",
+    "host": "db.YOUR-PROJECT.supabase.co",
+    "port": 5432,
+    "database": "postgres",
+    "username": "postgres",
+    "ssl_mode": "require"
+  },
+  "secret_reference": "env:DBM_PG_PASSWORD",
+  "destinations": [
+    {
+      "name": "Local HDD",
+      "type": "local",
+      "path": "D:\\Database Backups"
+    }
+  ],
+  "trigger": "manual"
+}
