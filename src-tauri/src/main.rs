@@ -41,6 +41,7 @@ fn main() {
             commands::test_connection_uri,
             commands::add_local_destination,
             commands::import_google_oauth_json,
+            commands::set_google_client,
             commands::google_client_configured,
             commands::connect_google_drive,
             commands::reconnect_google_drive,

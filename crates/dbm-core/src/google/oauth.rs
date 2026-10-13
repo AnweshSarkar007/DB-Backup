@@ -26,19 +26,33 @@ pub struct OAuthConfig {
 /// Parse the Desktop app credentials JSON downloaded from Google Cloud Console.
 pub fn parse_desktop_client_json(input: &str) -> Result<OAuthConfig> {
     #[derive(Deserialize)]
-    struct Document { installed: Option<Client> }
-    #[derive(Deserialize)]
-    struct Client { client_id: String, client_secret: Option<String> }
-    let doc: Document = serde_json::from_str(input).map_err(|e| BackupError::GoogleAuthenticationExpired {
-        detail: format!("invalid Google OAuth JSON: {e}"),
-    })?;
-    let client = doc.installed.ok_or_else(|| BackupError::GoogleAuthenticationExpired {
-        detail: "expected Google Cloud Console Desktop app JSON with an 'installed' section".into(),
-    })?;
-    if client.client_id.trim().is_empty() {
-        return Err(BackupError::GoogleAuthenticationExpired { detail: "OAuth JSON has an empty client_id".into() });
+    struct Document {
+        installed: Option<Client>,
     }
-    Ok(OAuthConfig { client_id: client.client_id, client_secret: client.client_secret.filter(|s| !s.trim().is_empty()) })
+    #[derive(Deserialize)]
+    struct Client {
+        client_id: String,
+        client_secret: Option<String>,
+    }
+    let doc: Document =
+        serde_json::from_str(input).map_err(|e| BackupError::GoogleAuthenticationExpired {
+            detail: format!("invalid Google OAuth JSON: {e}"),
+        })?;
+    let client = doc
+        .installed
+        .ok_or_else(|| BackupError::GoogleAuthenticationExpired {
+            detail: "expected Google Cloud Console Desktop app JSON with an 'installed' section"
+                .into(),
+        })?;
+    if client.client_id.trim().is_empty() {
+        return Err(BackupError::GoogleAuthenticationExpired {
+            detail: "OAuth JSON has an empty client_id".into(),
+        });
+    }
+    Ok(OAuthConfig {
+        client_id: client.client_id,
+        client_secret: client.client_secret.filter(|s| !s.trim().is_empty()),
+    })
 }
 
 /// Tokens returned by Google.
@@ -69,15 +83,25 @@ fn pkce() -> (String, String) {
 }
 
 /// Run the full loopback authorization flow, returning tokens (including a refresh token).
-pub async fn run_loopback_flow<F>(cfg: &OAuthConfig, scope: &str, open_browser: F) -> Result<(Tokens, String)>
-where F: FnOnce(&str) -> std::result::Result<(), String> {
+pub async fn run_loopback_flow<F>(
+    cfg: &OAuthConfig,
+    scope: &str,
+    open_browser: F,
+) -> Result<(Tokens, String)>
+where
+    F: FnOnce(&str) -> std::result::Result<(), String>,
+{
     // Bind a loopback listener on an ephemeral port for the redirect.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
-        .map_err(|e| BackupError::Internal { detail: format!("oauth listener: {e}") })?;
+        .map_err(|e| BackupError::Internal {
+            detail: format!("oauth listener: {e}"),
+        })?;
     let port = listener
         .local_addr()
-        .map_err(|e| BackupError::Internal { detail: e.to_string() })?
+        .map_err(|e| BackupError::Internal {
+            detail: e.to_string(),
+        })?
         .port();
     let redirect_uri = format!("http://127.0.0.1:{port}");
 
@@ -112,10 +136,9 @@ where F: FnOnce(&str) -> std::result::Result<(), String> {
 /// Accept a single redirect connection and extract the `code`, validating `state`.
 async fn accept_code(listener: &tokio::net::TcpListener, expected_state: &str) -> Result<String> {
     loop {
-        let (mut socket, _) = listener
-            .accept()
-            .await
-            .map_err(|e| BackupError::Internal { detail: format!("oauth accept: {e}") })?;
+        let (mut socket, _) = listener.accept().await.map_err(|e| BackupError::Internal {
+            detail: format!("oauth accept: {e}"),
+        })?;
         let mut buf = vec![0u8; 4096];
         let n = socket.read(&mut buf).await.unwrap_or(0);
         let req = String::from_utf8_lossy(&buf[..n]);
@@ -136,7 +159,12 @@ async fn accept_code(listener: &tokio::net::TcpListener, expected_state: &str) -
 
         if let Some(err) = extract_param(path, "error") {
             return Err(BackupError::GoogleAuthenticationExpired {
-                detail: format!("authorization denied: {err}{}", extract_param(path, "error_description").map(|d| format!(" ({d})")).unwrap_or_default()),
+                detail: format!(
+                    "authorization denied: {err}{}",
+                    extract_param(path, "error_description")
+                        .map(|d| format!(" ({d})"))
+                        .unwrap_or_default()
+                ),
             });
         }
         if let (Some(code), Some(state)) = (code, state) {
@@ -166,13 +194,17 @@ async fn exchange_code(
         ("grant_type", "authorization_code"),
         ("redirect_uri", redirect_uri),
     ];
-    if let Some(secret) = cfg.client_secret.as_deref() { params.push(("client_secret", secret)); }
+    if let Some(secret) = cfg.client_secret.as_deref() {
+        params.push(("client_secret", secret));
+    }
     let resp = client
         .post(TOKEN_ENDPOINT)
         .form(&params)
         .send()
         .await
-        .map_err(|e| BackupError::GoogleAuthenticationExpired { detail: e.to_string() })?;
+        .map_err(|e| BackupError::GoogleAuthenticationExpired {
+            detail: e.to_string(),
+        })?;
     if !resp.status().is_success() {
         let t = resp.text().await.unwrap_or_default();
         return Err(BackupError::GoogleAuthenticationExpired {
@@ -181,7 +213,9 @@ async fn exchange_code(
     }
     resp.json::<Tokens>()
         .await
-        .map_err(|e| BackupError::GoogleAuthenticationExpired { detail: e.to_string() })
+        .map_err(|e| BackupError::GoogleAuthenticationExpired {
+            detail: e.to_string(),
+        })
 }
 
 /// Obtain a fresh access token from a stored refresh token.
@@ -192,13 +226,17 @@ pub async fn refresh(cfg: &OAuthConfig, refresh_token: &str) -> Result<Tokens> {
         ("refresh_token", refresh_token),
         ("grant_type", "refresh_token"),
     ];
-    if let Some(secret) = cfg.client_secret.as_deref() { params.push(("client_secret", secret)); }
+    if let Some(secret) = cfg.client_secret.as_deref() {
+        params.push(("client_secret", secret));
+    }
     let resp = client
         .post(TOKEN_ENDPOINT)
         .form(&params)
         .send()
         .await
-        .map_err(|e| BackupError::GoogleAuthenticationExpired { detail: e.to_string() })?;
+        .map_err(|e| BackupError::GoogleAuthenticationExpired {
+            detail: e.to_string(),
+        })?;
     if !resp.status().is_success() {
         let t = resp.text().await.unwrap_or_default();
         return Err(BackupError::GoogleAuthenticationExpired {
@@ -207,7 +245,9 @@ pub async fn refresh(cfg: &OAuthConfig, refresh_token: &str) -> Result<Tokens> {
     }
     resp.json::<Tokens>()
         .await
-        .map_err(|e| BackupError::GoogleAuthenticationExpired { detail: e.to_string() })
+        .map_err(|e| BackupError::GoogleAuthenticationExpired {
+            detail: e.to_string(),
+        })
 }
 
 fn parse_query(path: &str) -> (Option<String>, Option<String>) {
@@ -230,7 +270,9 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -269,9 +311,18 @@ mod tests {
 
     #[test]
     fn query_parsing() {
-        assert_eq!(extract_param("/?code=abc&state=xyz", "code").as_deref(), Some("abc"));
-        assert_eq!(extract_param("/?code=abc&state=xyz", "state").as_deref(), Some("xyz"));
-        assert_eq!(extract_param("/?error=access_denied", "error").as_deref(), Some("access_denied"));
+        assert_eq!(
+            extract_param("/?code=abc&state=xyz", "code").as_deref(),
+            Some("abc")
+        );
+        assert_eq!(
+            extract_param("/?code=abc&state=xyz", "state").as_deref(),
+            Some("xyz")
+        );
+        assert_eq!(
+            extract_param("/?error=access_denied", "error").as_deref(),
+            Some("access_denied")
+        );
     }
 
     #[test]
@@ -281,10 +332,14 @@ mod tests {
 
     #[test]
     fn parses_desktop_json_and_rejects_web_credentials() {
-        let cfg = parse_desktop_client_json(r#"{"installed":{"client_id":"desktop-id","client_secret":"secret"}}"#).unwrap();
+        let cfg = parse_desktop_client_json(
+            r#"{"installed":{"client_id":"desktop-id","client_secret":"secret"}}"#,
+        )
+        .unwrap();
         assert_eq!(cfg.client_id, "desktop-id");
         assert_eq!(cfg.client_secret.as_deref(), Some("secret"));
-        let public = parse_desktop_client_json(r#"{"installed":{"client_id":"public-id"}}"#).unwrap();
+        let public =
+            parse_desktop_client_json(r#"{"installed":{"client_id":"public-id"}}"#).unwrap();
         assert_eq!(public.client_secret, None);
         assert!(parse_desktop_client_json(r#"{"web":{"client_id":"web-id"}}"#).is_err());
     }

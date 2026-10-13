@@ -1,4 +1,5 @@
-import { ErrorReport, ProgressEvent, RunResult, humanBytes } from "../api";
+import { ProgressEvent, RunResult, humanBytes } from "../api";
+import { normalizeError } from "../errors";
 import { BACKUP_STAGES } from "../hooks";
 
 export function ProgressPanel({
@@ -16,8 +17,10 @@ export function ProgressPanel({
       <h3>Progress</h3>
       <ul className="stages">
         {BACKUP_STAGES.map((s) => {
-          const done = events.some((e) => e.state === s);
-          const active = currentStage === s && running;
+          const index = BACKUP_STAGES.indexOf(s);
+          const done = events.some((e) => BACKUP_STAGES.indexOf(e.state) > index) ||
+            (s === "Completed" && events.some((e) => e.state === "Completed"));
+          const active = currentStage === s && running && !done;
           return (
             <li key={s} className={done ? "done" : active ? "active" : ""}>
               <span className="mark">{done ? "✓" : active ? "●" : "○"}</span> {s}
@@ -63,7 +66,8 @@ export function ResultPanel({ result }: { result: RunResult }) {
   );
 }
 
-export function ErrorPanel({ error }: { error: ErrorReport }) {
+export function ErrorPanel({ error: value }: { error: unknown }) {
+  const error = normalizeError(value);
   return (
     <div className="card error">
       <h3>{error.message}</h3>

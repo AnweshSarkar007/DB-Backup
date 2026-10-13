@@ -24,7 +24,12 @@ pub fn build(
         DestinationKind::Local { path } => {
             Ok(Box::new(LocalDestination::new(spec.name.clone(), path)?))
         }
-        DestinationKind::GoogleDrive { folder_id, client_id, refresh_token_ref, .. } => {
+        DestinationKind::GoogleDrive {
+            folder_id,
+            client_id,
+            refresh_token_ref,
+            ..
+        } => {
             let client_secret = match creds.get(GOOGLE_CLIENT_SECRET_REF) {
                 Ok(secret) => Some(secret),
                 Err(crate::error::BackupError::SecretNotFound { .. }) => None,

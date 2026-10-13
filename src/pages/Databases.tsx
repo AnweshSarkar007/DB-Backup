@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRequestGuard } from "../useRequestGuard";
+import { normalizeError } from "../errors";
 import {
   ConnInfo,
   ConnectionRecord,
@@ -75,16 +77,21 @@ function AddDatabase({ onAdded }: { onAdded: () => void }) {
   const [info, setInfo] = useState<ConnInfo | null>(null);
   const [error, setError] = useState<ErrorReport | null>(null);
 
+  const testTicket = useRequestGuard([uri, name]);
+  useEffect(() => { setInfo(null); setError(null); setTesting(false); }, [uri, name]);
+
   async function doTest() {
+    const current = testTicket();
     setError(null);
     setInfo(null);
     setTesting(true);
     try {
-      setInfo(await testConnectionUri(uri, name || "Database"));
+      const info = await testConnectionUri(uri, name || "Database");
+      if (current()) setInfo(info);
     } catch (e) {
-      setError(e as ErrorReport);
+      if (current()) setError(normalizeError(e));
     } finally {
-      setTesting(false);
+      if (current()) setTesting(false);
     }
   }
   async function doSave() {
@@ -150,17 +157,19 @@ function ConnectionCard({
 }) {
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const testTicket = useRequestGuard([conn.id]);
 
   async function test() {
+    const current = testTicket();
     setBusy(true);
     setStatus("Testing…");
     try {
       const info = await testConnection(conn.id);
-      setStatus(`Connected · PostgreSQL ${info.postgres_major}`);
+      if (current()) setStatus(`Connected · PostgreSQL ${info.postgres_major}`);
     } catch (e) {
-      setStatus((e as ErrorReport).message);
+      if (current()) setStatus(normalizeError(e).message);
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   }
   async function remove() {
@@ -205,7 +214,7 @@ function BackupDialog({
 }) {
   const enabled = destinations.filter((d) => d.enabled);
   const [selected, setSelected] = useState<number[]>(enabled.map((d) => d.id));
-  const { events, running, result, error, run, currentStage } = useBackup();
+  const { events, running, result, error, run, currentStage } = useBackup(`Saved database ${conn.id}: ${conn.config.name}`);
 
   function toggle(id: number) {
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));

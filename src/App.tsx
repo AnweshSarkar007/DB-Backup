@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { DockerHealth, dockerHealth } from "./api";
+import { useState } from "react";
+import { OperationPanel } from "./components/OperationPanel";
+import { useDockerHealth } from "./useDockerHealth";
 import Dashboard from "./pages/Dashboard";
 import Databases from "./pages/Databases";
 import Destinations from "./pages/Destinations";
@@ -32,13 +33,8 @@ const NAV: { key: NavKey; label: string }[] = [
 
 export default function App() {
   const [nav, setNav] = useState<NavKey>("dashboard");
-  const [docker, setDocker] = useState<DockerHealth | null>(null);
-
-  useEffect(() => {
-    dockerHealth()
-      .then(setDocker)
-      .catch(() => setDocker({ installed: false, running: false, version: null }));
-  }, []);
+  const health = useDockerHealth();
+  const docker = health.data;
 
   return (
     <div className="app">
@@ -62,18 +58,25 @@ export default function App() {
           ))}
         </nav>
         <div className="docker-status">
-          <span className={`dot ${docker?.running ? "ok" : docker?.installed ? "warn" : "bad"}`} />
-          {docker == null
+          <span className={`dot ${health.loading || health.error || !docker ? "warn" : docker.running ? "ok" : docker.installed ? "warn" : "bad"}`} />
+          {health.loading
             ? "Checking Docker…"
+            : health.error
+            ? "Docker check failed — status unknown"
+            : docker == null
+            ? "Docker status unknown"
             : docker.running
             ? `Docker ${docker.version ?? ""}`
             : docker.installed
             ? "Docker not running"
             : "Docker not installed"}
+          {health.error && <div className="small" role="alert">{health.error.message}</div>}
+          <button onClick={() => { void health.recheck(); }} disabled={health.loading}>Recheck Docker</button>
         </div>
       </aside>
 
       <main className="content">
+        <OperationPanel />
         {nav === "dashboard" && <Dashboard />}
         {nav === "databases" && <Databases />}
         {nav === "quick" && <DevBackup />}

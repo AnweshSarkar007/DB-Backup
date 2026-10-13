@@ -27,14 +27,19 @@ impl GoogleDriveDestination {
     ) -> Self {
         GoogleDriveDestination {
             name: name.into(),
-            cfg: OAuthConfig { client_id: client_id.into(), client_secret },
+            cfg: OAuthConfig {
+                client_id: client_id.into(),
+                client_secret,
+            },
             refresh_token: refresh_token.into(),
             folder_id: folder_id.into(),
         }
     }
 
     async fn token(&self) -> Result<String> {
-        oauth::refresh(&self.cfg, &self.refresh_token).await.map(|t| t.access_token)
+        oauth::refresh(&self.cfg, &self.refresh_token)
+            .await
+            .map(|t| t.access_token)
     }
 }
 
@@ -61,7 +66,8 @@ impl StorageDestination for GoogleDriveDestination {
             let _ = drive::delete_file(&token, &existing).await;
         }
         let bytes = tokio::fs::metadata(local).await?.len();
-        let file_id = drive::upload_resumable(&token, &self.folder_id, dest_filename, local).await?;
+        let file_id =
+            drive::upload_resumable(&token, &self.folder_id, dest_filename, local).await?;
         Ok(UploadOutput {
             stored_path: format!("drive:{}/{}", self.folder_id, dest_filename),
             bytes_written: bytes,
@@ -71,10 +77,17 @@ impl StorageDestination for GoogleDriveDestination {
 
     async fn exists(&self, dest_filename: &str) -> Result<bool> {
         let token = self.token().await?;
-        Ok(drive::find_file(&token, &self.folder_id, dest_filename).await?.is_some())
+        Ok(drive::find_file(&token, &self.folder_id, dest_filename)
+            .await?
+            .is_some())
     }
 
-    async fn verify(&self, dest_filename: &str, _expected_sha256: &str, expected_size: u64) -> Result<()> {
+    async fn verify(
+        &self,
+        dest_filename: &str,
+        _expected_sha256: &str,
+        expected_size: u64,
+    ) -> Result<()> {
         let token = self.token().await?;
         let id = drive::find_file(&token, &self.folder_id, dest_filename)
             .await?

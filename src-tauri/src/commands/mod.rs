@@ -1,6 +1,11 @@
 //! Tauri command layer — a *thin* adapter over `dbm-core` (spec Rule 1/8). No business logic here:
 //! commands manage app state, call the core, and translate results/errors for the frontend.
 
+use dbm_core::google::{drive, oauth};
+use dbm_core::model::TriggerTypeDefaulted;
+use dbm_core::traits::{ArchiveEntry, BackupRunner, DatabaseSource};
+use dbm_core::DockerPgRunner;
+use dbm_core::OAuthConfig;
 use dbm_core::{
     doctor, run_backup, AppPaths, AutoStore, ConnectionConfig, ConnectionRecord, CredentialStore,
     Database, DestinationKind, DestinationRecord, DestinationSpec, DockerHealth, EngineOptions,
@@ -8,11 +13,6 @@ use dbm_core::{
     RunSummary, Schedule, TaskScheduler, TaskStatus, TriggerType, DRIVE_FILE_SCOPE,
     GOOGLE_CLIENT_SECRET_REF,
 };
-use dbm_core::google::{drive, oauth};
-use dbm_core::OAuthConfig;
-use dbm_core::model::TriggerTypeDefaulted;
-use dbm_core::traits::{ArchiveEntry, BackupRunner, DatabaseSource};
-use dbm_core::DockerPgRunner;
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, State};
@@ -75,7 +75,10 @@ pub fn add_connection(
     name: String,
     uri: String,
 ) -> Result<ConnectionRecord, ErrorReport> {
-    state.db.add_connection_from_uri(&name, &uri, &state.creds).map_err(|e| rep(&e))
+    state
+        .db
+        .add_connection_from_uri(&name, &uri, &state.creds)
+        .map_err(|e| rep(&e))
 }
 
 #[tauri::command]
@@ -85,17 +88,20 @@ pub fn list_connections(state: State<'_, AppState>) -> Result<Vec<ConnectionReco
 
 #[tauri::command]
 pub fn delete_connection(state: State<'_, AppState>, id: i64) -> Result<(), ErrorReport> {
-    state.db.delete_connection(id, &state.creds).map_err(|e| rep(&e))
+    state
+        .db
+        .delete_connection(id, &state.creds)
+        .map_err(|e| rep(&e))
 }
 
 /// Test a saved connection (by id), updating its detected version.
 #[tauri::command]
-pub async fn test_connection(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<ConnInfo, ErrorReport> {
+pub async fn test_connection(state: State<'_, AppState>, id: i64) -> Result<ConnInfo, ErrorReport> {
     let rec = state.db.get_connection(id).map_err(|e| rep(&e))?;
-    let password = state.creds.get(&rec.secret_reference).map_err(|e| rep(&e))?;
+    let password = state
+        .creds
+        .get(&rec.secret_reference)
+        .map_err(|e| rep(&e))?;
     let info = probe(&rec.config, &password).await?;
     let _ = state.db.set_connection_version(id, info.postgres_major);
     Ok(info)
@@ -136,40 +142,45 @@ pub fn add_local_destination(
     name: String,
     path: String,
 ) -> Result<DestinationRecord, ErrorReport> {
-    state.db.add_local_destination(&name, &path).map_err(|e| rep(&e))
+    state
+        .db
+        .add_local_destination(&name, &path)
+        .map_err(|e| rep(&e))
 }
 
 #[tauri::command]
-pub fn list_destinations(state: State<'_, AppState>) -> Result<Vec<DestinationRecord>, ErrorReport> {
+pub fn list_destinations(
+    state: State<'_, AppState>,
+) -> Result<Vec<DestinationRecord>, ErrorReport> {
     state.db.list_destinations().map_err(|e| rep(&e))
 }
 
 #[derive(Debug, Serialize)]
-pub struct GoogleOAuthImportResult { pub client_id: String, pub accounts_reconnect_required: usize, pub same_client_id: bool }
+pub struct GoogleOAuthImportResult {
+    pub client_id: String,
+    pub accounts_reconnect_required: usize,
+    pub same_client_id: bool,
+}
 
-/// Read OAuth JSON in Rust so credentials never enter frontend JavaScript.
-#[tauri::command]
-pub fn import_google_oauth_json(state: State<'_, AppState>, path: String) -> Result<GoogleOAuthImportResult, ErrorReport> {
-    let metadata = std::fs::metadata(&path).map_err(|e| rep(&dbm_core::BackupError::GoogleAuthenticationExpired { detail: format!("could not read selected JSON file: {e}") }))?;
-    if metadata.len() > 1024 * 1024 { return Err(rep(&dbm_core::BackupError::GoogleAuthenticationExpired { detail: "OAuth JSON file is unexpectedly large".into() })); }
-    let json = std::fs::read_to_string(&path).map_err(|e| rep(&dbm_core::BackupError::GoogleAuthenticationExpired { detail: format!("could not read selected JSON file: {e}") }))?;
-    let cfg = oauth::parse_desktop_client_json(&json).map_err(|e| rep(&e))?;
+fn save_google_oauth_config(state: &AppState, cfg: OAuthConfig) -> Result<GoogleOAuthImportResult, ErrorReport> {
     let old_id = state.db.get_setting("google:client_id").map_err(|e| rep(&e))?;
     let same_client_id = old_id.as_deref() == Some(cfg.client_id.as_str());
     let old_secret = state.creds.get(GOOGLE_CLIENT_SECRET_REF).ok();
-    let new_secret = cfg.client_secret.as_deref();
-    let credential_result = match new_secret { Some(s) => state.creds.set(GOOGLE_CLIENT_SECRET_REF, s), None => state.creds.delete(GOOGLE_CLIENT_SECRET_REF) };
+    let credential_result = match cfg.client_secret.as_deref() {
+        Some(secret) => state.creds.set(GOOGLE_CLIENT_SECRET_REF, secret),
+        None => state.creds.delete(GOOGLE_CLIENT_SECRET_REF),
+    };
     credential_result.map_err(|e| rep(&e))?;
     if let Err(e) = state.db.set_setting("google:client_id", &cfg.client_id) {
-        match old_secret { Some(s) => { let _ = state.creds.set(GOOGLE_CLIENT_SECRET_REF, &s); }, None => { let _ = state.creds.delete(GOOGLE_CLIENT_SECRET_REF); } }
+        match old_secret { Some(secret) => { let _ = state.creds.set(GOOGLE_CLIENT_SECRET_REF, &secret); }, None => { let _ = state.creds.delete(GOOGLE_CLIENT_SECRET_REF); } }
         return Err(rep(&e));
     }
     let accounts_reconnect_required = if same_client_id { 0 } else {
         match state.db.mark_google_destinations_for_reauthorization(&cfg.client_id) {
             Ok(n) => n,
             Err(e) => {
-                if let Some(id) = old_id { let _ = state.db.set_setting("google:client_id", &id); }
-                match old_secret { Some(s) => { let _ = state.creds.set(GOOGLE_CLIENT_SECRET_REF, &s); }, None => { let _ = state.creds.delete(GOOGLE_CLIENT_SECRET_REF); } }
+                match old_id { Some(id) => { let _ = state.db.set_setting("google:client_id", &id); }, None => { let _ = state.db.delete_setting("google:client_id"); } }
+                match old_secret { Some(secret) => { let _ = state.creds.set(GOOGLE_CLIENT_SECRET_REF, &secret); }, None => { let _ = state.creds.delete(GOOGLE_CLIENT_SECRET_REF); } }
                 return Err(rep(&e));
             }
         }
@@ -177,28 +188,87 @@ pub fn import_google_oauth_json(state: State<'_, AppState>, path: String) -> Res
     Ok(GoogleOAuthImportResult { client_id: cfg.client_id, accounts_reconnect_required, same_client_id })
 }
 
+/// Read OAuth JSON in Rust so credentials never enter frontend JavaScript.
+#[tauri::command]
+pub fn import_google_oauth_json(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<GoogleOAuthImportResult, ErrorReport> {
+    let metadata = std::fs::metadata(&path).map_err(|e| {
+        rep(&dbm_core::BackupError::GoogleAuthenticationExpired {
+            detail: format!("could not read selected JSON file: {e}"),
+        })
+    })?;
+    if metadata.len() > 1024 * 1024 {
+        return Err(rep(&dbm_core::BackupError::GoogleAuthenticationExpired {
+            detail: "OAuth JSON file is unexpectedly large".into(),
+        }));
+    }
+    let json = std::fs::read_to_string(&path).map_err(|e| {
+        rep(&dbm_core::BackupError::GoogleAuthenticationExpired {
+            detail: format!("could not read selected JSON file: {e}"),
+        })
+    })?;
+    let cfg = oauth::parse_desktop_client_json(&json).map_err(|e| rep(&e))?;
+    save_google_oauth_config(&state, cfg)
+}
+
+#[tauri::command]
+pub fn set_google_client(state: State<'_, AppState>, client_id: String, client_secret: String) -> Result<GoogleOAuthImportResult, ErrorReport> {
+    let client_id = client_id.trim().to_string();
+    if client_id.is_empty() { return Err(rep(&dbm_core::BackupError::GoogleAuthenticationExpired { detail: "OAuth client ID is required".into() })); }
+    save_google_oauth_config(&state, OAuthConfig { client_id, client_secret: if client_secret.trim().is_empty() { None } else { Some(client_secret) } })
+}
+
 #[tauri::command]
 pub fn google_client_configured(state: State<'_, AppState>) -> Result<bool, ErrorReport> {
-    let has_id = state.db.get_setting("google:client_id").map_err(|e| rep(&e))?.is_some();
+    let has_id = state
+        .db
+        .get_setting("google:client_id")
+        .map_err(|e| rep(&e))?
+        .is_some();
     Ok(has_id)
 }
 
 fn current_google_oauth_config(state: &AppState) -> Result<OAuthConfig, ErrorReport> {
-    let client_id = state.db.get_setting("google:client_id").map_err(|e| rep(&e))?
-        .ok_or_else(|| rep(&dbm_core::BackupError::GoogleAuthenticationExpired { detail: "Import a Google Cloud Console Desktop app JSON file first".into() }))?;
+    let client_id = state
+        .db
+        .get_setting("google:client_id")
+        .map_err(|e| rep(&e))?
+        .ok_or_else(|| {
+            rep(&dbm_core::BackupError::GoogleAuthenticationExpired {
+                detail: "Import a Google Cloud Console Desktop app JSON file first".into(),
+            })
+        })?;
     let client_secret = match state.creds.get(GOOGLE_CLIENT_SECRET_REF) {
         Ok(s) => Some(s),
         Err(dbm_core::BackupError::SecretNotFound { .. }) => None,
         Err(e) => return Err(rep(&e)),
     };
-    Ok(OAuthConfig { client_id, client_secret })
+    Ok(OAuthConfig {
+        client_id,
+        client_secret,
+    })
 }
 
-async fn google_authorize(app: &AppHandle, cfg: &OAuthConfig) -> Result<(String, String, String), ErrorReport> {
-    let (tokens, _) = oauth::run_loopback_flow(cfg, DRIVE_FILE_SCOPE, |url| app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())).await.map_err(|e| rep(&e))?;
+async fn google_authorize(
+    app: &AppHandle,
+    cfg: &OAuthConfig,
+) -> Result<(String, String, String), ErrorReport> {
+    let (tokens, _) = oauth::run_loopback_flow(cfg, DRIVE_FILE_SCOPE, |url| {
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| rep(&e))?;
     let refresh = tokens.refresh_token.ok_or_else(|| rep(&dbm_core::BackupError::GoogleAuthenticationExpired { detail: "Google did not return a refresh token; revoke this app's prior access and try again".into() }))?;
-    let email = drive::account_email(&tokens.access_token).await.map_err(|e| rep(&e))?;
-    let folder = drive::ensure_folder(&tokens.access_token, "Database Backup Manager", None).await.map_err(|e| rep(&e))?;
+    let email = drive::account_email(&tokens.access_token)
+        .await
+        .map_err(|e| rep(&e))?;
+    let folder = drive::ensure_folder(&tokens.access_token, "Database Backup Manager", None)
+        .await
+        .map_err(|e| rep(&e))?;
     Ok((refresh, email, folder))
 }
 
@@ -214,7 +284,10 @@ pub async fn connect_google_drive(
     let (refresh_token, email, folder_id) = google_authorize(&app, &cfg).await?;
 
     let refresh_ref = format!("gdrive:{}", uuid_v4());
-    state.creds.set(&refresh_ref, &refresh_token).map_err(|e| rep(&e))?;
+    state
+        .creds
+        .set(&refresh_ref, &refresh_token)
+        .map_err(|e| rep(&e))?;
 
     let config_json = serde_json::json!({
         "account_email": email,
@@ -230,30 +303,69 @@ pub async fn connect_google_drive(
 }
 
 #[tauri::command]
-pub async fn reconnect_google_drive(app: AppHandle, state: State<'_, AppState>, destination_id: i64) -> Result<DestinationRecord, ErrorReport> {
-    let existing = state.db.get_destination(destination_id).map_err(|e| rep(&e))?;
-    if existing.kind != "google_drive" { return Err(rep(&dbm_core::BackupError::Internal { detail: "selected destination is not Google Drive".into() })); }
+pub async fn reconnect_google_drive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    destination_id: i64,
+) -> Result<DestinationRecord, ErrorReport> {
+    let existing = state
+        .db
+        .get_destination(destination_id)
+        .map_err(|e| rep(&e))?;
+    if existing.kind != "google_drive" {
+        return Err(rep(&dbm_core::BackupError::Internal {
+            detail: "selected destination is not Google Drive".into(),
+        }));
+    }
     let cfg = current_google_oauth_config(&state)?;
     let (refresh, email, folder) = google_authorize(&app, &cfg).await?;
-    let secret_ref = existing.secret_reference.clone().ok_or_else(|| rep(&dbm_core::BackupError::Database { detail: "Google destination is missing its credential reference".into() }))?;
+    let secret_ref = existing.secret_reference.clone().ok_or_else(|| {
+        rep(&dbm_core::BackupError::Database {
+            detail: "Google destination is missing its credential reference".into(),
+        })
+    })?;
     let previous_secret = state.creds.get(&secret_ref).ok();
-    state.creds.set(&secret_ref, &refresh).map_err(|e| rep(&e))?;
-    let mut configuration: serde_json::Value = serde_json::from_str(&existing.configuration_json).map_err(|e| rep(&dbm_core::BackupError::Database { detail: format!("bad Google destination config: {e}") }))?;
+    state
+        .creds
+        .set(&secret_ref, &refresh)
+        .map_err(|e| rep(&e))?;
+    let mut configuration: serde_json::Value = serde_json::from_str(&existing.configuration_json)
+        .map_err(|e| {
+        rep(&dbm_core::BackupError::Database {
+            detail: format!("bad Google destination config: {e}"),
+        })
+    })?;
     configuration["account_email"] = serde_json::Value::String(email);
     configuration["folder_id"] = serde_json::Value::String(folder);
     configuration["client_id"] = serde_json::Value::String(cfg.client_id);
     configuration["reauthorization_required"] = serde_json::Value::Bool(false);
-    if let Err(e) = state.db.reconnect_google_destination(destination_id, &configuration.to_string()) {
-        match previous_secret { Some(s) => { let _ = state.creds.set(&secret_ref, &s); }, None => { let _ = state.creds.delete(&secret_ref); } }
+    if let Err(e) = state
+        .db
+        .reconnect_google_destination(destination_id, &configuration.to_string())
+    {
+        match previous_secret {
+            Some(s) => {
+                let _ = state.creds.set(&secret_ref, &s);
+            }
+            None => {
+                let _ = state.creds.delete(&secret_ref);
+            }
+        }
         return Err(rep(&e));
     }
-    state.db.get_destination(destination_id).map_err(|e| rep(&e))
+    state
+        .db
+        .get_destination(destination_id)
+        .map_err(|e| rep(&e))
 }
 
 fn uuid_v4() -> String {
     // Small local helper to avoid importing uuid into the GUI crate.
     use std::time::{SystemTime, UNIX_EPOCH};
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     format!("{n:x}")
 }
 
@@ -263,7 +375,10 @@ pub fn set_destination_enabled(
     id: i64,
     enabled: bool,
 ) -> Result<(), ErrorReport> {
-    state.db.set_destination_enabled(id, enabled).map_err(|e| rep(&e))
+    state
+        .db
+        .set_destination_enabled(id, enabled)
+        .map_err(|e| rep(&e))
 }
 
 #[tauri::command]
@@ -282,7 +397,10 @@ pub async fn backup_now(
     connection_id: i64,
     destination_ids: Vec<i64>,
 ) -> Result<RunResult, ErrorReport> {
-    let conn = state.db.get_connection(connection_id).map_err(|e| rep(&e))?;
+    let conn = state
+        .db
+        .get_connection(connection_id)
+        .map_err(|e| rep(&e))?;
 
     // Build destination specs from the selected saved destinations.
     let mut destinations: Vec<DestinationSpec> = Vec::new();
@@ -309,7 +427,10 @@ pub async fn backup_now(
     let progress = move |p: Progress| {
         let _ = app2.emit(
             "backup-progress",
-            ProgressEvent { state: format!("{:?}", p.state), message: p.message },
+            ProgressEvent {
+                state: format!("{:?}", p.state),
+                message: p.message,
+            },
         );
     };
 
@@ -357,11 +478,20 @@ pub async fn run_local_backup(
     let progress = move |p: Progress| {
         let _ = app2.emit(
             "backup-progress",
-            ProgressEvent { state: format!("{:?}", p.state), message: p.message },
+            ProgressEvent {
+                state: format!("{:?}", p.state),
+                message: p.message,
+            },
         );
     };
     let result = run_backup(&job, &state.paths, &creds, &opts, progress).await;
-    let _ = state.db.record_run(&result, None, None, TriggerType::Manual, &parsed.config.name);
+    let _ = state.db.record_run(
+        &result,
+        None,
+        None,
+        TriggerType::Manual,
+        &parsed.config.name,
+    );
     Ok(result)
 }
 
@@ -390,7 +520,10 @@ pub fn get_run(state: State<'_, AppState>, uuid: String) -> Result<RunSummary, E
 /// Pick the pg image for a dump: prefer the sibling manifest's version, else a sensible default.
 async fn image_for_dump(dump: &std::path::Path) -> String {
     let manifest_name = dbm_core::backup::naming::manifest_for_dump(
-        &dump.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+        &dump
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
     );
     if let Some(dir) = dump.parent() {
         if let Ok(m) = dbm_core::backup::manifest::read_manifest(&dir.join(manifest_name)).await {
@@ -438,11 +571,16 @@ pub async fn browse_open(
     if let Some(prev) = guard.take() {
         prev.close().await;
     }
-    let session = dbm_core::BrowseSession::open(&p, &image).await.map_err(|e| rep(&e))?;
+    let session = dbm_core::BrowseSession::open(&p, &image)
+        .await
+        .map_err(|e| rep(&e))?;
     let tables = session.list_tables().await.map_err(|e| rep(&e))?;
     let restore_warning = session.restore_warning().map(str::to_string);
     *guard = Some(session);
-    Ok(dbm_core::BrowseOpenResult { tables, restore_warning })
+    Ok(dbm_core::BrowseOpenResult {
+        tables,
+        restore_warning,
+    })
 }
 
 #[tauri::command]
@@ -488,7 +626,10 @@ pub async fn restore_backup(
     target_connection_id: i64,
     confirm_text: String,
 ) -> Result<(), ErrorReport> {
-    let target = state.db.get_connection(target_connection_id).map_err(|e| rep(&e))?;
+    let target = state
+        .db
+        .get_connection(target_connection_id)
+        .map_err(|e| rep(&e))?;
 
     // Defense-in-depth: require the user to have typed the target's exact name.
     if confirm_text.trim() != target.config.name {
@@ -504,7 +645,10 @@ pub async fn restore_backup(
         }));
     }
 
-    let password = state.creds.get(&target.secret_reference).map_err(|e| rep(&e))?;
+    let password = state
+        .creds
+        .get(&target.secret_reference)
+        .map_err(|e| rep(&e))?;
     // Verify the target is reachable before we touch it.
     let _ = probe(&target.config, &password).await?;
 
@@ -515,7 +659,9 @@ pub async fn restore_backup(
         image,
         clean: true,
     };
-    dbm_core::restore_to_target(&p, &params).await.map_err(|e| rep(&e))
+    dbm_core::restore_to_target(&p, &params)
+        .await
+        .map_err(|e| rep(&e))
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -581,9 +727,18 @@ pub fn list_schedules(state: State<'_, AppState>) -> Result<Vec<ScheduleInfo>, E
             .schedule_json
             .as_deref()
             .and_then(|j| serde_json::from_str::<Schedule>(j).ok());
-        let destination_ids = state.db.policy_destination_ids(policy.id).unwrap_or_default();
+        let destination_ids = state
+            .db
+            .policy_destination_ids(policy.id)
+            .unwrap_or_default();
         let task = sched.status(&policy.uuid).unwrap_or_default();
-        out.push(ScheduleInfo { policy, connection_name, schedule, destination_ids, task });
+        out.push(ScheduleInfo {
+            policy,
+            connection_name,
+            schedule,
+            destination_ids,
+            task,
+        });
     }
     Ok(out)
 }
@@ -601,14 +756,21 @@ pub fn set_schedule_enabled(
             .schedule_json
             .as_deref()
             .and_then(|j| serde_json::from_str(j).ok())
-            .ok_or_else(|| rep(&dbm_core::BackupError::SchedulerFailed {
-                detail: "policy has no schedule".into(),
-            }))?;
-        sched.create_or_update(policy.id, &policy.uuid, &schedule).map_err(|e| rep(&e))?;
+            .ok_or_else(|| {
+                rep(&dbm_core::BackupError::SchedulerFailed {
+                    detail: "policy has no schedule".into(),
+                })
+            })?;
+        sched
+            .create_or_update(policy.id, &policy.uuid, &schedule)
+            .map_err(|e| rep(&e))?;
     } else {
         sched.delete(&policy.uuid).map_err(|e| rep(&e))?;
     }
-    state.db.set_policy_enabled(id, enabled).map_err(|e| rep(&e))
+    state
+        .db
+        .set_policy_enabled(id, enabled)
+        .map_err(|e| rep(&e))
 }
 
 #[tauri::command]
@@ -627,12 +789,18 @@ pub async fn run_schedule_now(
     id: i64,
 ) -> Result<RunResult, ErrorReport> {
     let hydrated = state.db.hydrate_policy_job(id).map_err(|e| rep(&e))?;
-    let opts = EngineOptions { retention: hydrated.retention, ..Default::default() };
+    let opts = EngineOptions {
+        retention: hydrated.retention,
+        ..Default::default()
+    };
     let app2 = app.clone();
     let progress = move |p: Progress| {
         let _ = app2.emit(
             "backup-progress",
-            ProgressEvent { state: format!("{:?}", p.state), message: p.message },
+            ProgressEvent {
+                state: format!("{:?}", p.state),
+                message: p.message,
+            },
         );
     };
     let result = run_backup(&hydrated.job, &state.paths, &state.creds, &opts, progress).await;

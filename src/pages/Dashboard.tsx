@@ -16,25 +16,38 @@ export default function Dashboard() {
   const runs = useAsync<RunSummary[]>(() => listRuns(null, null, 8), []);
 
   const last = runs.data?.[0];
+  const successful = runs.data?.find((run) => run.status === "Completed");
 
   return (
     <div className="page">
       <h1>Dashboard</h1>
       <div className="stat-row">
-        <Stat label="Databases" value={`${conns.data?.length ?? 0} connected`} />
+        <Stat label="Saved databases" value={conns.loading ? "Loading…" : conns.error ? "Could not load" : `${conns.data?.length ?? 0} saved`} />
         <Stat
-          label="Last Backup"
-          value={last ? `${last.status} · ${fmtDate(last.started_at)}` : "None yet"}
+          label="Latest attempt"
+          value={runs.loading ? "Loading…" : runs.error ? "Could not load" : last ? `${last.status} · ${fmtDate(last.started_at)}` : "No recent attempts"}
+        />
+        <Stat
+          label="Last successful backup (recent history)"
+          value={runs.loading ? "Loading…" : runs.error ? "Could not load" : successful
+            ? fmtDate(successful.started_at) : "None in recent history"}
         />
         <Stat
           label="Destinations"
-          value={`${dests.data?.filter((d) => d.enabled).length ?? 0} enabled`}
+          value={dests.loading ? "Loading…" : dests.error ? "Could not load" : `${dests.data?.filter((d) => d.enabled).length ?? 0} enabled`}
         />
       </div>
 
+      {[{label: "Saved databases", source: conns}, {label: "Destinations", source: dests}, {label: "Recent activity", source: runs}].map(({label, source}) => source.error && (
+        <div className="card error" role="alert" key={label}>
+          {label}: {source.error.message} <button onClick={() => source.reload()}>Retry</button>
+        </div>
+      ))}
+      <p className="small muted">Based on up to 8 recent attempts; older successful backups may not be shown. Retained history may be incomplete.</p>
       <h3>Recent activity</h3>
-      {runs.data?.length === 0 && <div className="card muted">No backups yet.</div>}
-      {runs.data && runs.data.length > 0 && (
+      {runs.loading && <div className="card muted">Loading…</div>}
+      {!runs.loading && !runs.error && runs.data?.length === 0 && <div className="card muted">No recent backup activity available.</div>}
+      {!runs.loading && !runs.error && runs.data && runs.data.length > 0 && (
         <table className="table">
           <tbody>
             {runs.data.map((r) => (

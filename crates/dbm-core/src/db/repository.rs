@@ -47,26 +47,34 @@ impl DestinationRecord {
         let kind = match self.kind.as_str() {
             "local" => {
                 let cfg: serde_json::Value = serde_json::from_str(&self.configuration_json)
-                    .map_err(|e| BackupError::Database { detail: format!("bad dest config: {e}") })?;
+                    .map_err(|e| BackupError::Database {
+                        detail: format!("bad dest config: {e}"),
+                    })?;
                 let path = cfg
                     .get("path")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| BackupError::Database { detail: "local dest missing path".into() })?
+                    .ok_or_else(|| BackupError::Database {
+                        detail: "local dest missing path".into(),
+                    })?
                     .to_string();
                 DestinationKind::Local { path }
             }
             "google_drive" => {
                 let cfg: serde_json::Value = serde_json::from_str(&self.configuration_json)
-                    .map_err(|e| BackupError::Database { detail: format!("bad dest config: {e}") })?;
-                let s = |k: &str| cfg.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                    .map_err(|e| BackupError::Database {
+                        detail: format!("bad dest config: {e}"),
+                    })?;
+                let s = |k: &str| {
+                    cfg.get(k)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string()
+                };
                 DestinationKind::GoogleDrive {
                     account_email: s("account_email"),
                     folder_id: s("folder_id"),
                     client_id: s("client_id"),
-                    refresh_token_ref: self
-                        .secret_reference
-                        .clone()
-                        .unwrap_or_default(),
+                    refresh_token_ref: self.secret_reference.clone().unwrap_or_default(),
                 }
             }
             other => {
@@ -75,7 +83,11 @@ impl DestinationRecord {
                 })
             }
         };
-        Ok(DestinationSpec { name: self.name.clone(), enabled: self.enabled, kind })
+        Ok(DestinationSpec {
+            name: self.name.clone(),
+            enabled: self.enabled,
+            kind,
+        })
     }
 }
 
@@ -193,15 +205,23 @@ impl Database {
 
     pub fn get_connection(&self, id: i64) -> Result<ConnectionRecord> {
         self.with_conn(|c| {
-            c.query_row("SELECT * FROM connections WHERE id=?1", [id], row_to_connection)
-                .map_err(Into::into)
+            c.query_row(
+                "SELECT * FROM connections WHERE id=?1",
+                [id],
+                row_to_connection,
+            )
+            .map_err(Into::into)
         })
     }
 
     pub fn get_connection_by_uuid(&self, uuid: &str) -> Result<ConnectionRecord> {
         self.with_conn(|c| {
-            c.query_row("SELECT * FROM connections WHERE uuid=?1", [uuid], row_to_connection)
-                .map_err(Into::into)
+            c.query_row(
+                "SELECT * FROM connections WHERE uuid=?1",
+                [uuid],
+                row_to_connection,
+            )
+            .map_err(Into::into)
         })
     }
 
@@ -276,24 +296,43 @@ impl Database {
 
     pub fn get_destination(&self, id: i64) -> Result<DestinationRecord> {
         self.with_conn(|c| {
-            c.query_row("SELECT * FROM destinations WHERE id=?1", [id], row_to_destination)
-                .map_err(Into::into)
+            c.query_row(
+                "SELECT * FROM destinations WHERE id=?1",
+                [id],
+                row_to_destination,
+            )
+            .map_err(Into::into)
         })
     }
 
     pub fn get_destination_by_uuid(&self, uuid: &str) -> Result<DestinationRecord> {
         self.with_conn(|c| {
-            c.query_row("SELECT * FROM destinations WHERE uuid=?1", [uuid], row_to_destination)
-                .map_err(Into::into)
+            c.query_row(
+                "SELECT * FROM destinations WHERE uuid=?1",
+                [uuid],
+                row_to_destination,
+            )
+            .map_err(Into::into)
         })
     }
 
     pub fn set_destination_enabled(&self, id: i64, enabled: bool) -> Result<()> {
         self.with_conn(|c| {
             if enabled {
-                let rec = c.query_row("SELECT type, configuration_json FROM destinations WHERE id=?1", [id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-                if rec.0 == "google_drive" && serde_json::from_str::<serde_json::Value>(&rec.1).ok().and_then(|v| v.get("reauthorization_required").and_then(|x| x.as_bool())).unwrap_or(false) {
-                    return Err(BackupError::GoogleAuthenticationExpired { detail: "Reconnect this Google Drive account before enabling it".into() });
+                let rec = c.query_row(
+                    "SELECT type, configuration_json FROM destinations WHERE id=?1",
+                    [id],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                )?;
+                if rec.0 == "google_drive"
+                    && serde_json::from_str::<serde_json::Value>(&rec.1)
+                        .ok()
+                        .and_then(|v| v.get("reauthorization_required").and_then(|x| x.as_bool()))
+                        .unwrap_or(false)
+                {
+                    return Err(BackupError::GoogleAuthenticationExpired {
+                        detail: "Reconnect this Google Drive account before enabling it".into(),
+                    });
                 }
             }
             c.execute(
@@ -306,7 +345,10 @@ impl Database {
 
     /// On OAuth client replacement, preserve existing destination identities and tokens while
     /// disabling those that must authorize against the new client.
-    pub fn mark_google_destinations_for_reauthorization(&self, new_client_id: &str) -> Result<usize> {
+    pub fn mark_google_destinations_for_reauthorization(
+        &self,
+        new_client_id: &str,
+    ) -> Result<usize> {
         self.with_conn(|c| {
             let mut stmt = c.prepare("SELECT id, configuration_json FROM destinations WHERE type='google_drive'")?;
             let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
@@ -383,15 +425,23 @@ impl Database {
 
     pub fn get_policy(&self, id: i64) -> Result<PolicyRecord> {
         self.with_conn(|c| {
-            c.query_row("SELECT * FROM backup_policies WHERE id=?1", [id], row_to_policy)
-                .map_err(Into::into)
+            c.query_row(
+                "SELECT * FROM backup_policies WHERE id=?1",
+                [id],
+                row_to_policy,
+            )
+            .map_err(Into::into)
         })
     }
 
     pub fn get_policy_by_uuid(&self, uuid: &str) -> Result<PolicyRecord> {
         self.with_conn(|c| {
-            c.query_row("SELECT * FROM backup_policies WHERE uuid=?1", [uuid], row_to_policy)
-                .map_err(Into::into)
+            c.query_row(
+                "SELECT * FROM backup_policies WHERE uuid=?1",
+                [uuid],
+                row_to_policy,
+            )
+            .map_err(Into::into)
         })
     }
 
@@ -558,8 +608,12 @@ impl Database {
 
     pub fn get_run_by_uuid(&self, uuid: &str) -> Result<RunSummary> {
         self.with_conn(|c| {
-            c.query_row("SELECT * FROM backup_runs WHERE uuid=?1", [uuid], row_to_run_summary)
-                .map_err(Into::into)
+            c.query_row(
+                "SELECT * FROM backup_runs WHERE uuid=?1",
+                [uuid],
+                row_to_run_summary,
+            )
+            .map_err(Into::into)
         })
     }
 
@@ -567,9 +621,11 @@ impl Database {
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         self.with_conn(|c| {
-            c.query_row("SELECT value FROM app_settings WHERE key=?1", [key], |r| r.get(0))
-                .optional()
-                .map_err(Into::into)
+            c.query_row("SELECT value FROM app_settings WHERE key=?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(Into::into)
         })
     }
 
@@ -580,6 +636,13 @@ impl Database {
                  ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 params![key, value],
             )?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.with_conn(|c| {
+            c.execute("DELETE FROM app_settings WHERE key=?1", [key])?;
             Ok(())
         })
     }
@@ -704,7 +767,9 @@ mod tests {
     #[test]
     fn destination_roundtrip_and_spec() {
         let db = Database::open_in_memory().unwrap();
-        let d = db.add_local_destination("Local HDD", r"D:\Backups").unwrap();
+        let d = db
+            .add_local_destination("Local HDD", r"D:\Backups")
+            .unwrap();
         assert_eq!(db.list_destinations().unwrap().len(), 1);
         let spec = d.to_spec().unwrap();
         assert_eq!(spec.name, "Local HDD");
@@ -712,6 +777,32 @@ mod tests {
             DestinationKind::Local { path } => assert_eq!(path, r"D:\Backups"),
             _ => panic!("expected a local destination"),
         }
+    }
+
+    #[test]
+    fn replacing_google_client_requires_in_place_reconnect() {
+        let db = Database::open_in_memory().unwrap();
+        let destination = db.add_destination("Drive", "google_drive", &serde_json::json!({
+            "account_email": "user@example.com", "folder_id": "folder", "client_id": "old-client"
+        }).to_string(), Some("gdrive:existing")).unwrap();
+        assert_eq!(
+            db.mark_google_destinations_for_reauthorization("new-client")
+                .unwrap(),
+            1
+        );
+        let disabled = db.get_destination(destination.id).unwrap();
+        assert!(!disabled.enabled);
+        assert!(db.set_destination_enabled(destination.id, true).is_err());
+        db.reconnect_google_destination(destination.id, &serde_json::json!({
+            "account_email": "user@example.com", "folder_id": "folder", "client_id": "new-client", "reauthorization_required": false
+        }).to_string()).unwrap();
+        let connected = db.get_destination(destination.id).unwrap();
+        assert_eq!(connected.uuid, destination.uuid);
+        assert!(connected.enabled);
+        assert_eq!(
+            connected.secret_reference.as_deref(),
+            Some("gdrive:existing")
+        );
     }
 
     #[test]
@@ -733,7 +824,8 @@ mod tests {
             error_message: None,
         });
 
-        db.record_run(&result, None, None, TriggerType::Manual, "My DB").unwrap();
+        db.record_run(&result, None, None, TriggerType::Manual, "My DB")
+            .unwrap();
         let runs = db.list_runs(None, None, 10).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "COMPLETED");

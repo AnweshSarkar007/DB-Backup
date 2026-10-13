@@ -13,7 +13,7 @@ import {
   runScheduleNow,
   setScheduleEnabled,
 } from "../api";
-import { useAsync } from "../hooks";
+import { useAsync, useBackup } from "../hooks";
 import { ErrorPanel } from "../components/BackupView";
 
 const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -68,9 +68,7 @@ export default function Schedules() {
               </div>
             </div>
             <div className="row">
-              <button onClick={() => runScheduleNow(s.policy.id).then(() => schedules.reload())}>
-                Run now
-              </button>
+              <RunScheduleButton schedule={s} onFinished={schedules.reload} />
               <button
                 onClick={() =>
                   setScheduleEnabled(s.policy.id, !s.policy.enabled).then(schedules.reload)
@@ -92,6 +90,13 @@ export default function Schedules() {
       ))}
     </div>
   );
+}
+
+function RunScheduleButton({ schedule, onFinished }: { schedule: ScheduleInfo; onFinished: () => void }) {
+  const { running, run } = useBackup(`Schedule ${schedule.policy.id}: ${schedule.policy.name}`);
+  return <button disabled={running} onClick={() => {
+    void run(() => runScheduleNow(schedule.policy.id)).then(onFinished);
+  }}>Run now</button>;
 }
 
 function describe(s: Schedule | null): string {

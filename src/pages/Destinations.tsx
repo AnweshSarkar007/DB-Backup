@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   DestinationRecord, ErrorReport, addLocalDestination, connectGoogleDrive,
   deleteDestination, googleClientConfigured, importGoogleOAuthJson,
-  listDestinations, reconnectGoogleDrive, setDestinationEnabled,
+  listDestinations, reconnectGoogleDrive, setDestinationEnabled, setGoogleClient,
 } from "../api";
 import { useAsync } from "../hooks";
 import { ErrorPanel } from "../components/BackupView";
@@ -14,21 +14,41 @@ function GoogleDriveSection({ onChanged }: { onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ErrorReport | null>(null);
   const [note, setNote] = useState("");
+  const [selectedFile, setSelectedFile] = useState("");
+  const [manualOpen, setManualOpen] = useState(false);
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+
+  function importedMessage(result: Awaited<ReturnType<typeof importGoogleOAuthJson>>) {
+    setNote(result.same_client_id
+      ? "OAuth client saved. Existing Google Drive accounts remain connected."
+      : result.accounts_reconnect_required
+        ? `OAuth client saved. Reconnect ${result.accounts_reconnect_required} existing Google Drive account(s).`
+        : "OAuth client saved.");
+    configured.reload();
+    onChanged();
+  }
 
   async function importClient() {
     setError(null);
     try {
       const path = await open({ multiple: false, title: "Choose Google OAuth Desktop JSON", filters: [{ name: "JSON", extensions: ["json"] }] });
       if (typeof path !== "string") return;
-      const result = await importGoogleOAuthJson(path);
-      setNote(result.same_client_id
-        ? "OAuth client updated. Existing Google Drive accounts remain connected."
-        : result.accounts_reconnect_required
-          ? `OAuth client imported. Reconnect ${result.accounts_reconnect_required} existing Google Drive account(s).`
-          : "OAuth client imported.");
-      configured.reload();
-      onChanged();
+      setSelectedFile(path.split(/[\\/]/).pop() || path);
+      setBusy(true);
+      setNote("Importing OAuth JSON...");
+      importedMessage(await importGoogleOAuthJson(path));
     } catch (e) { setError(e as ErrorReport); }
+    finally { setBusy(false); }
+  }
+
+  async function saveManual() {
+    setError(null); setBusy(true); setNote("Saving OAuth client...");
+    try {
+      importedMessage(await setGoogleClient(clientId, clientSecret));
+      setClientId(""); setClientSecret("");
+    } catch (e) { setError(e as ErrorReport); setNote(""); }
+    finally { setBusy(false); }
   }
 
   async function connect() {
@@ -47,9 +67,20 @@ function GoogleDriveSection({ onChanged }: { onChanged: () => void }) {
       <button className="primary" onClick={connect} disabled={busy}>{busy ? "Waiting for authorization..." : "Connect Google Drive"}</button>
     </div>}
     <p className="small muted">{configured.data
-      ? <>OAuth Desktop client configured. Import another JSON file to replace it.</>
-      : <>Choose the OAuth JSON downloaded for a Google Cloud Console <b>Desktop app</b> client. Enable the Drive API first. The app requests only the <code>drive.file</code> scope.</>}</p>
-    <button onClick={importClient} disabled={busy}>Import / replace OAuth JSON</button>
+      ? <>OAuth Desktop client configured. Import another JSON file or enter credentials manually to replace it.</>
+      : <>Choose the OAuth JSON downloaded for a Google Cloud Console <b>Desktop app</b> client, or add its credentials manually. Enable the Drive API first. The app requests only the <code>drive.file</code> scope.</>}</p>
+    <div className="row">
+      <button onClick={importClient} disabled={busy}>{busy && note.startsWith("Importing") ? "Importing file..." : "Choose OAuth JSON file"}</button>
+      <button onClick={() => setManualOpen((open) => !open)} disabled={busy}>{manualOpen ? "Hide manual entry" : "Add manually"}</button>
+    </div>
+    {selectedFile && <div className="small muted">Selected file: <b>{selectedFile}</b></div>}
+    {manualOpen && <div className="stack">
+      <label>OAuth client ID</label>
+      <input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="...apps.googleusercontent.com" />
+      <label>OAuth client secret (optional)</label>
+      <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder="Client secret" />
+      <button className="primary" onClick={saveManual} disabled={busy || !clientId.trim()}>{busy && note.startsWith("Saving") ? "Saving..." : "Save OAuth credentials"}</button>
+    </div>}
     {note && <div className="small muted">{note}</div>}
     {error && <ErrorPanel error={error} />}
   </div>;

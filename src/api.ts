@@ -163,6 +163,8 @@ export const addLocalDestination = (name: string, path: string): Promise<Destina
 export interface GoogleOAuthImportResult { client_id: string; accounts_reconnect_required: number; same_client_id: boolean }
 export const importGoogleOAuthJson = (path: string): Promise<GoogleOAuthImportResult> =>
   invoke("import_google_oauth_json", { path });
+export const setGoogleClient = (clientId: string, clientSecret: string): Promise<GoogleOAuthImportResult> =>
+  invoke("set_google_client", { clientId, clientSecret });
 export const googleClientConfigured = (): Promise<boolean> => invoke("google_client_configured");
 export const connectGoogleDrive = (name: string): Promise<DestinationRecord> =>
   invoke("connect_google_drive", { name });

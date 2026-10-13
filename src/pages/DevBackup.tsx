@@ -1,6 +1,8 @@
 // "Quick Backup": a one-off backup from a pasted URI to a chosen folder, without saving anything.
 // The saved-connection flow lives on the Databases page.
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRequestGuard } from "../useRequestGuard";
+import { normalizeError } from "../errors";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ConnInfo, ErrorReport, humanBytes, runLocalBackup, testConnectionUri } from "../api";
 import { useBackup } from "../hooks";
@@ -15,7 +17,7 @@ export default function DevBackup() {
   const [testing, setTesting] = useState(false);
   const [testErr, setTestErr] = useState<ErrorReport | null>(null);
   const [folderErr, setFolderErr] = useState<ErrorReport | null>(null);
-  const { events, running, result, error, run, currentStage } = useBackup();
+  const { events, running, result, error, run, currentStage } = useBackup("Quick Backup");
 
   async function pickFolder() {
     setFolderErr(null);
@@ -31,16 +33,21 @@ export default function DevBackup() {
       });
     }
   }
+  const testTicket = useRequestGuard([uri, name]);
+  useEffect(() => { setConn(null); setTestErr(null); setTesting(false); }, [uri, name]);
+
   async function doTest() {
+    const current = testTicket();
     setTestErr(null);
     setConn(null);
     setTesting(true);
     try {
-      setConn(await testConnectionUri(uri, name));
+      const info = await testConnectionUri(uri, name);
+      if (current()) setConn(info);
     } catch (e) {
-      setTestErr(e as ErrorReport);
+      if (current()) setTestErr(normalizeError(e));
     } finally {
-      setTesting(false);
+      if (current()) setTesting(false);
     }
   }
 
