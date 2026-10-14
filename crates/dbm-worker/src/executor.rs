@@ -3,9 +3,9 @@
 
 use anyhow::{Context, Result};
 use dbm_core::{
-    backup::engine::Progress, docker, AppPaths, AutoStore, BackupRunner, BackupState,
-    CredentialStore, Database, DatabaseSource, DockerPgRunner, EngineOptions, JobSpec,
-    PostgresSource, RunResult, TriggerType,
+    backup::engine::Progress, docker, native::SelectedRunner, AppPaths, AutoStore, BackupRunner,
+    BackupState, CredentialStore, Database, DatabaseSource, EngineOptions, JobSpec, PostgresSource,
+    RunResult, TriggerType,
 };
 use std::path::Path;
 
@@ -72,7 +72,10 @@ pub async fn test_connection(spec: &JobSpec) -> Result<()> {
 /// Run a full backup from a standalone spec (not recorded in history — no DB context).
 pub async fn run(spec: &JobSpec, paths: &AppPaths, keep_temp: bool) -> RunResult {
     let creds = AutoStore::new();
-    let opts = EngineOptions { keep_temp_on_success: keep_temp, ..Default::default() };
+    let opts = EngineOptions {
+        keep_temp_on_success: keep_temp,
+        ..Default::default()
+    };
     let progress = |p: Progress| println!("[{:?}] {}", p.state, p.message);
     dbm_core::run_backup(spec, paths, &creds, &opts, progress).await
 }
@@ -105,11 +108,11 @@ pub async fn run_job(policy_id: i64, paths: &AppPaths, keep_temp: bool) -> Resul
 }
 
 /// Inspect an archive's table of contents.
-pub async fn inspect(dump: &Path, image: &str) -> Result<()> {
+pub async fn inspect(dump: &Path, _image: &str) -> Result<()> {
     if !dump.exists() {
         anyhow::bail!("dump not found: {}", dump.display());
     }
-    let runner = DockerPgRunner::new(image.to_string(), 300);
+    let runner = SelectedRunner::select(17, 300);
     let entries = runner
         .inspect(dump)
         .await

@@ -4,8 +4,10 @@
 
 - **Rust** stable (1.77+), with `cargo`.
 - **Node.js** 18+ and npm.
-- **Docker Desktop**, running (Linux containers). All pg tooling runs in Docker; no host
-  `pg_dump`/`pg_restore` is needed.
+- **Docker Desktop**, running only for the browse-only backup browser and as the backup/restore fallback.
+- **Bundled PostgreSQL 17 client tools** for the primary backup, verify, inspect, and restore path.
+  Packaging machines stage them with `scripts/stage-postgresql17.ps1`; the repository does not
+  fabricate or include vendor binaries.
 - **Windows 11** (primary target). WebView2 runtime (preinstalled on Win11).
 
 ## Layout

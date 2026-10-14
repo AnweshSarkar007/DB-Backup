@@ -21,6 +21,7 @@ pub mod error;
 pub mod google;
 pub mod logging;
 pub mod model;
+pub mod native;
 pub mod redact;
 pub mod restore;
 pub mod retention;
@@ -30,24 +31,24 @@ pub mod util;
 
 // Curated public surface for the shells (GUI + worker).
 pub use backup::{run_backup, EngineOptions, Progress};
+pub use browse::{BrowseOpenResult, BrowseSession, TableInfo, TablePage};
 pub use config::{parse_connection_uri, AppPaths, ConnectionConfig, ParsedConnection, SslMode};
 pub use credentials::{AutoStore, EnvStore, MemoryStore, WinCredStore};
 pub use database::PostgresSource;
 pub use db::{
     ConnectionRecord, Database, DestinationRecord, HydratedJob, PolicyRecord, RunSummary,
 };
-pub use browse::{BrowseOpenResult, BrowseSession, TableInfo, TablePage};
-pub use restore::{restore_to_target, RestoreParams};
-pub use retention::RetentionPolicy;
-pub use scheduler::{Frequency, Schedule, TaskScheduler, TaskStatus};
 pub use destinations::{GoogleDriveDestination, LocalDestination, GOOGLE_CLIENT_SECRET_REF};
-pub use google::{OAuthConfig, DRIVE_FILE_SCOPE};
 pub use docker::{doctor, DockerHealth, DockerPgRunner};
 pub use error::{BackupError, ErrorReport, Result};
+pub use google::{OAuthConfig, DRIVE_FILE_SCOPE};
 pub use model::{
     compute_final_state, BackupState, DestinationKind, DestinationResult, DestinationSpec,
     DestinationStatus, JobSpec, Manifest, RunResult, TriggerType, VerificationStatus,
 };
+pub use restore::{restore_to_target, RestoreParams};
+pub use retention::RetentionPolicy;
+pub use scheduler::{Frequency, Schedule, TaskScheduler, TaskStatus};
 pub use traits::{
     ArchiveEntry, BackupRunner, CredentialStore, DatabaseInfo, DatabaseSource, ServerVersion,
     StorageDestination,

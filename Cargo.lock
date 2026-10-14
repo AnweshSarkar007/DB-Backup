@@ -824,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "database-backup-manager"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dbm-core",
  "serde",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "dbm-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -865,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "dbm-worker"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",

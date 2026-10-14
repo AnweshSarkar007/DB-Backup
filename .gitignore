@@ -14,6 +14,11 @@ dist-ssr
 src-tauri/gen
 src-tauri/target
 
+# Vendor binaries are staged at packaging time and distributed in the installer, not committed.
+resources/postgresql/17/bin/*
+!resources/postgresql/17/bin/README.md
+resources/postgresql/17/lib/*
+
 # Env / secrets — NEVER commit real credentials
 .env
 .env.*

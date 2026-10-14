@@ -37,6 +37,9 @@ pub async fn run_docker(
     redact: Option<&str>,
 ) -> Result<CmdOutput> {
     let mut cmd = Command::new(docker_exe());
+    // CREATE_NO_WINDOW: avoid console flashes and focus-triggered health-check loops.
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

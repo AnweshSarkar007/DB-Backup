@@ -5,8 +5,9 @@
 //! `pg_restore` in Docker, connecting to the target with the target's own SSL settings.
 
 use crate::config::ConnectionConfig;
-use crate::docker::{self, container_runner, container_runner::PgConnOpts, image_manager};
+use crate::docker;
 use crate::error::Result;
+use crate::native::{RunnerKind, SelectedRunner};
 use std::path::Path;
 
 /// Parameters for a restore into an existing target database.
@@ -22,20 +23,10 @@ pub struct RestoreParams {
 
 /// Restore `dump` into `params.target`. The target database must already exist.
 pub async fn restore_to_target(dump: &Path, params: &RestoreParams) -> Result<()> {
-    docker::require_ready().await?;
-    image_manager::ensure_image(&params.image).await?;
-
-    let opts = PgConnOpts {
-        image: params.image.clone(),
-        host: params.target.host.clone(),
-        port: params.target.port,
-        user: params.target.username.clone(),
-        database: params.target.database.clone(),
-        ssl_mode: params.target.ssl_mode,
-        password: params.password.clone(),
-        network: None,
-        timeout_secs: 3600,
-    };
-    let name = format!("dbm-restore-{}", uuid::Uuid::new_v4());
-    container_runner::run_pg_restore(&opts, &name, dump, false, params.clean).await
+    let runner = SelectedRunner::select(17, 3600);
+    if runner.kind() == RunnerKind::Docker {
+        docker::require_ready().await?;
+        docker::ensure_image(&params.image).await?;
+    }
+    runner.restore(dump, params).await
 }

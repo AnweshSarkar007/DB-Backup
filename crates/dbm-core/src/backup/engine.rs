@@ -12,9 +12,10 @@
 use crate::backup::{hash, manifest, naming};
 use crate::config::AppPaths;
 use crate::database::PostgresSource;
-use crate::docker::{self, DockerPgRunner};
+use crate::docker;
 use crate::error::BackupError;
 use crate::model::*;
+use crate::native::SelectedRunner;
 use crate::traits::{
     BackupRunner, CredentialStore, DatabaseSource, DumpParams, StorageDestination,
 };
@@ -119,16 +120,24 @@ where
         &format!("Connected. PostgreSQL {} detected.", version.major),
     );
 
-    // --- Docker readiness + matching image (Sections 7/8). ---
-    emit(progress, BackupState::Preparing, "Checking Docker…");
-    docker::require_ready().await?;
-    let image = docker::image_for_major(version.major)?;
+    // Native tools are primary. Docker readiness/image setup happens only for the selected
+    // fallback, before the runner starts; there is no automatic mid-operation fallback.
     emit(
         progress,
         BackupState::Preparing,
-        &format!("Ensuring backup engine image {image}…"),
+        "Selecting PostgreSQL client tools…",
     );
-    docker::ensure_image(&image).await?;
+    let runner = SelectedRunner::select(version.major, opts.dump_timeout_secs);
+    let image = format!("postgres:{}", version.major);
+    if runner.kind() == crate::native::RunnerKind::Docker {
+        emit(
+            progress,
+            BackupState::Preparing,
+            "Native PostgreSQL tools unavailable; using Docker fallback…",
+        );
+        docker::require_ready().await?;
+        docker::ensure_image(&image).await?;
+    }
 
     // --- Working directory (Section 27) + disk-space check (Section 26). ---
     let run_dir = paths.create_run_dir(backup_id)?;
@@ -158,7 +167,6 @@ where
     result.filename = Some(dump_name.clone());
 
     emit(progress, BackupState::Dumping, "Running pg_dump…");
-    let runner = DockerPgRunner::new(image.clone(), opts.dump_timeout_secs);
     let dump_params = DumpParams {
         connection: job.connection.clone(),
         password: password.clone(),
@@ -235,8 +243,14 @@ where
     };
     manifest::write_manifest(&manifest_path, &man).await?;
     // Best-effort: also place the final manifest next to the dump at each completed destination.
-    upload_manifest_to_completed(job, &manifest_path, &manifest_name, &result.destinations, creds)
-        .await;
+    upload_manifest_to_completed(
+        job,
+        &manifest_path,
+        &manifest_name,
+        &result.destinations,
+        creds,
+    )
+    .await;
 
     // --- Retention (Section 25): applied per local destination, only where the copy succeeded. ---
     if let Some(policy) = opts.retention {
@@ -385,7 +399,8 @@ async fn apply_retention<P: Fn(Progress)>(
         #[allow(clippy::single_match)]
         match &spec.kind {
             crate::model::DestinationKind::Local { path } => {
-                let dest = match crate::destinations::LocalDestination::new(spec.name.clone(), path) {
+                let dest = match crate::destinations::LocalDestination::new(spec.name.clone(), path)
+                {
                     Ok(d) => d,
                     Err(_) => continue,
                 };
